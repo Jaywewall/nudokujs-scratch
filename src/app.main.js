@@ -1,5 +1,13 @@
+import { state, grid, numberPicker, radialMenu, inputPill, undoRedoPopover, modals } from './app.state.js';
+import { handleGridPointerDown, handleGridPointerMove, handleGridPointerUp, handleKeyboardInput, handleCandidateCycling, handleEraseInput, handleRadialInput, solveCandidateSingles, toggleCandidateIsolationMode, toggleIsolationNumber } from './app.interactions.js';
+import { clearSelections, clearTappedTarget, clearHighlights, highlightNumber, showInputPill, hideInputPill, showRadialMenu, hideRadialMenu, addHoldIndicator, removeHoldIndicator, updateUndoRedoButtons, showModal, hideModal } from './app.ui.js';
+import { loadBoard, saveHistory, loadFromHistory, updateHiddenSinglesState } from './app.board.js';
+import { populatePuzzleList, loadPuzzles } from './app.puzzles.js';
+import { renderBoard } from './app.render.js';
+import { init } from './app.board.js';
+
 // --- EVENT LISTENERS ---
-function setupEventListeners() {
+export function setupEventListeners() {
     // Grid interactions
     grid.addEventListener('pointerdown', handleGridPointerDown);
     grid.addEventListener('pointermove', handleGridPointerMove);
@@ -41,7 +49,7 @@ function setupEventListeners() {
 
         if (outsideInteractive) {
             clearSelections(); // Clears cell selections, target, and highlights
-            if (isCandidateIsolationMode) toggleCandidateIsolationMode(false);
+            if (state.isCandidateIsolationMode) toggleCandidateIsolationMode(false);
             if (radialMenu.style.display === 'block') hideRadialMenu();
             if (inputPill.style.display === 'flex') hideInputPill();
         }
@@ -63,7 +71,7 @@ function setupEventListeners() {
       e.preventDefault();
       const btn = e.target.closest('.number-picker-btn');
       if (!btn || btn.disabled) return;
-      if (isCandidateIsolationMode) {
+      if (state.isCandidateIsolationMode) {
         if (btn.dataset.number) toggleIsolationNumber(parseInt(btn.dataset.number, 10));
         return;
       }
@@ -98,19 +106,19 @@ function setupEventListeners() {
         if (!isSwipe && Date.now() - pickerPointerDownTime < 500) {
             if (!btn) return;
 
-            if (isCandidateIsolationMode) return; // Isolation handles its own clicks
+            if (state.isCandidateIsolationMode) return; // Isolation handles its own clicks
 
             // --- Number Button Tap ---
             if (btn.dataset.number) {
                 const num = parseInt(btn.dataset.number, 10);
 
-                if (selectedCells.size > 0) {
+                if (state.selectedCells.size > 0) {
                     // Action 1: Cycle candidates for selected cells
                     clearTappedTarget(); // Candidate input clears target
                     handleCandidateCycling(num); // Use pickup logic (saves history inside if changed)
-                } else if (tappedTargetCellIndex !== null) {
+                } else if (state.tappedTargetCellIndex !== null) {
                     // Action 2: Target is set, compare numbers
-                    const targetState = gameState[tappedTargetCellIndex];
+                    const targetState = state.gameState[state.tappedTargetCellIndex];
                     if (targetState && targetState.value === num) {
                         // Tapped same number as target -> Clear highlight
                         clearHighlights(); // This also clears the target
@@ -137,18 +145,18 @@ function setupEventListeners() {
                 let changeMade = false;
 
                 // Priority 1: Tapped Target
-                if (tappedTargetCellIndex !== null) {
-                    const targetState = gameState[tappedTargetCellIndex];
+                if (state.tappedTargetCellIndex !== null) {
+                    const targetState = state.gameState[state.tappedTargetCellIndex];
                     if (targetState && !targetState.isGiven) {
-                        if (handleEraseInput(tappedTargetCellIndex)) { // handleEraseInput NO LONGER saves history
+                        if (handleEraseInput(state.tappedTargetCellIndex)) { // handleEraseInput NO LONGER saves history
                             changeMade = true;
                         }
                     }
                     clearTappedTarget(); // Clear target after attempting delete
                 }
                 // Priority 2: Selected Cells (only if target wasn't handled)
-                else if (selectedCells.size > 0) {
-                    selectedCells.forEach(index => {
+                else if (state.selectedCells.size > 0) {
+                    state.selectedCells.forEach(index => {
                         if (handleEraseInput(index)) { // handleEraseInput NO LONGER saves history
                             changeMade = true;
                         }
@@ -169,21 +177,21 @@ function setupEventListeners() {
 
     // Header Buttons & Modals
     // Core Actions
-    document.getElementById('header-undo-btn').addEventListener('click', () => { if(historyIndex > 0) loadFromHistory(historyIndex - 1); });
-    document.getElementById('header-redo-btn').addEventListener('click', () => { if(historyIndex < history.length - 1) loadFromHistory(historyIndex + 1); });
+    document.getElementById('header-undo-btn').addEventListener('click', () => { if(state.historyIndex > 0) loadFromHistory(state.historyIndex - 1); });
+    document.getElementById('header-redo-btn').addEventListener('click', () => { if(state.historyIndex < state.history.length - 1) loadFromHistory(state.historyIndex + 1); });
 
     // Button to open the new game select modal
     document.getElementById('new-game-modal-btn').addEventListener('click', () => {
         console.log("New Game button clicked!"); // DEBUG
         const difficultySelect = document.getElementById('difficulty-select');
         if (difficultySelect) {
-            console.log(`Setting difficulty select to: ${activeDifficulty}`); // DEBUG
-            difficultySelect.value = activeDifficulty;
+            console.log(`Setting difficulty select to: ${state.activeDifficulty}`); // DEBUG
+            difficultySelect.value = state.activeDifficulty;
         } else {
             console.error("Error: Difficulty select element not found!"); // DEBUG
         }
-        console.log(`Calling populatePuzzleList with difficulty: ${activeDifficulty}`); // DEBUG
-        populatePuzzleList(activeDifficulty);
+        console.log(`Calling populatePuzzleList with difficulty: ${state.activeDifficulty}`); // DEBUG
+        populatePuzzleList(state.activeDifficulty);
         console.log("Calling showModal('newGameSelect')"); // DEBUG
         showModal('newGameSelect');
     });
@@ -197,12 +205,12 @@ function setupEventListeners() {
     
     if (biValueToggle) {
         biValueToggle.addEventListener('change', (e) => {
-            isAssistBiValueActive = e.target.checked;
+            state.isAssistBiValueActive = e.target.checked;
             // --- ADDED: Mutual Exclusivity ---
-            if (isAssistBiValueActive) {
+            if (state.isAssistBiValueActive) {
                 if (hiddenSinglesToggle) hiddenSinglesToggle.checked = false;
-                isAssistHiddenSinglesActive = false;
-                gameState.forEach(cell => cell.hiddenSingle = null); // Clear state
+                state.isAssistHiddenSinglesActive = false;
+                state.gameState.forEach(cell => cell.hiddenSingle = null); // Clear state
             }
             // --- END ---
             updateClearRulesButtonVisibility();
@@ -213,15 +221,15 @@ function setupEventListeners() {
     // <<< ADDED: Listener for Hidden Singles Toggle >>>
     if (hiddenSinglesToggle) {
         hiddenSinglesToggle.addEventListener('change', (e) => {
-            isAssistHiddenSinglesActive = e.target.checked;
+            state.isAssistHiddenSinglesActive = e.target.checked;
             // --- ADDED: Mutual Exclusivity ---
-            if (isAssistHiddenSinglesActive) {
+            if (state.isAssistHiddenSinglesActive) {
                 if (biValueToggle) biValueToggle.checked = false;
-                isAssistBiValueActive = false;
+                state.isAssistBiValueActive = false;
                 updateHiddenSinglesState(); // Run the calculation once
             } else {
                 // Clear the state if toggled off
-                gameState.forEach(cell => cell.hiddenSingle = null);
+                state.gameState.forEach(cell => cell.hiddenSingle = null);
             }
             // --- END ---
             updateClearRulesButtonVisibility();
@@ -236,9 +244,9 @@ function setupEventListeners() {
         if (hiddenSinglesToggle) hiddenSinglesToggle.checked = false; // <<< ADDED
 
         // Manually trigger the state update and re-render
-        isAssistBiValueActive = false;
-        isAssistHiddenSinglesActive = false; // <<< ADDED
-        gameState.forEach(cell => cell.hiddenSingle = null); // <<< ADDED
+        state.isAssistBiValueActive = false;
+        state.isAssistHiddenSinglesActive = false; // <<< ADDED
+        state.gameState.forEach(cell => cell.hiddenSingle = null); // <<< ADDED
         
         updateClearRulesButtonVisibility();
         renderBoard();
@@ -278,15 +286,15 @@ function setupEventListeners() {
 
     // Modal Confirm Actions
     document.getElementById('confirm-reset-btn').addEventListener('click', () => {
-        const currentPuzzleData = puzzleCatalog[activeDifficulty]?.find(p => p.id === currentPuzzleId);
+        const currentPuzzleData = state.puzzleCatalog[state.activeDifficulty]?.find(p => p.id === state.currentPuzzleId);
         if (currentPuzzleData) {
             loadBoard(currentPuzzleData.puzzle, currentPuzzleData.solution, currentPuzzleData.id);
         } else {
-            const firstPuzzle = puzzleCatalog.Easy?.[0];
+            const firstPuzzle = state.puzzleCatalog.Easy?.[0];
             if (firstPuzzle) {
                 loadBoard(firstPuzzle.puzzle, firstSpoon.solution, firstPuzzle.id);
             } else {
-                loadBoard(initialBoardString, initialSolutionString);
+                loadBoard(state.initialBoardString, state.initialSolutionString);
             }
         }
         clearSelections();
@@ -322,20 +330,20 @@ function setupEventListeners() {
     radialMenu.addEventListener('click', (e) => {
         const item = e.target.closest('.radial-item');
         // Ensure radial target is valid before proceeding
-        if (item && radialTargetIndex !== null && gameState[radialTargetIndex]) {
+        if (item && state.radialTargetIndex !== null && state.gameState[state.radialTargetIndex]) {
             let changeMade = false; // Flag specifically for the erase action
 
             if (item.dataset.number) {
                  const num = parseInt(item.dataset.number);
                  // handleRadialInput sets final value, clears candidates, saves history, renders, highlights, etc.
                  // It also clears selections/target internally.
-                 handleRadialInput(num, radialTargetIndex);
+                 handleRadialInput(num, state.radialTargetIndex);
                  // No need for explicit changeMade check here as handleRadialInput handles changes
             }
             else if (item.dataset.action === 'erase') {
                  // Check if the target is erasable (not given)
-                 if (!gameState[radialTargetIndex].isGiven) {
-                     if (handleEraseInput(radialTargetIndex)) { // handleEraseInput NO LONGER saves history
+                 if (!state.gameState[state.radialTargetIndex].isGiven) {
+                     if (handleEraseInput(state.radialTargetIndex)) { // handleEraseInput NO LONGER saves history
                          changeMade = true;
                      }
                  }
@@ -360,8 +368,8 @@ function setupEventListeners() {
     const difficultySelect = document.getElementById('difficulty-select');
     if (difficultySelect) {
         difficultySelect.addEventListener('change', (e) => {
-            activeDifficulty = e.target.value;
-            populatePuzzleList(activeDifficulty);
+            state.activeDifficulty = e.target.value;
+            populatePuzzleList(state.activeDifficulty);
         });
     }
 
@@ -369,7 +377,7 @@ function setupEventListeners() {
     const blackoutToggle = document.getElementById('blackout-mode-toggle');
     if (blackoutToggle) {
         blackoutToggle.addEventListener('change', (e) => {
-            isBlackoutModeEnabled = e.target.checked;
+            state.isBlackoutModeEnabled = e.target.checked;
             const highlightedButton = numberPicker.querySelector('.picker-selected[data-number]');
             if (highlightButton) {
                 const num = parseInt(highlightedButton.dataset.number, 10);
@@ -383,10 +391,10 @@ function setupEventListeners() {
 }
 
 // --- ADDED: Helper for Assistance Feature ---
-function updateClearRulesButtonVisibility() {
+export function updateClearRulesButtonVisibility() {
     const clearRulesBtn = document.getElementById('clear-rules-btn');
     // Check all assistance states. If any are true, show the button.
-    const anyRuleActive = isAssistBiValueActive || isAssistHiddenSinglesActive; // <<< MODIFIED
+    const anyRuleActive = state.isAssistBiValueActive || state.isAssistHiddenSinglesActive; // <<< MODIFIED
     
     if (anyRuleActive) {
         clearRulesBtn.classList.remove('hidden');
@@ -397,4 +405,4 @@ function updateClearRulesButtonVisibility() {
 
 
 // --- START GAME ---
-document.addEventListener('DOMContentLoaded', init);
+init();
