@@ -1,11 +1,15 @@
+import { state, grid, numberPicker } from './app.state.js';
+import { COLORS } from './app.state.js';
+import { loadPuzzles } from './app.puzzles.js';
+import { renderBoard } from './app.render.js';
+import { updateUndoRedoButtons } from './app.ui.js';
+
 // --- INITIALIZATION ---
-async function init() {
+export async function init() {
     generateGrid();
     generateNumberPicker();
     precomputePeers();
-    setupEventListeners();
-    // REMOVED: updateNewGameControls(); // This function no longer exists
-    await loadPuzzles(); // Fetch puzzles, load solved data, and load the first puzzle
+    await loadPuzzles();
 }
 
 function generateGrid() {
@@ -73,15 +77,15 @@ function generateRadialMenu() {
     }
 }
 
-function loadBoard(boardString, solutionString = "", puzzleId = null) {
-    initialBoardString = boardString.replace(/0/g, '.');
-    initialSolutionString = solutionString.replace(/0/g, '.');
-    currentSolutionString = initialSolutionString;
-    currentPuzzleId = puzzleId;
+export function loadBoard(boardString, solutionString = "", puzzleId = null) {
+    state.initialBoardString = boardString.replace(/0/g, '.');
+    state.initialSolutionString = solutionString.replace(/0/g, '.');
+    state.currentSolutionString = state.initialSolutionString;
+    state.currentPuzzleId = puzzleId;
 
-    console.log(`Loading puzzle ID: ${currentPuzzleId || 'N/A'}`);
+    console.log(`Loading puzzle ID: ${state.currentPuzzleId || 'N/A'}`);
 
-    gameState = initialBoardString.split('').map((char, index) => {
+    state.gameState = state.initialBoardString.split('').map((char, index) => {
         const value = parseInt(char.replace('.', '0'), 10);
         return {
             value: value === 0 ? null : value,
@@ -89,44 +93,42 @@ function loadBoard(boardString, solutionString = "", puzzleId = null) {
             candidates: new Set(),
             antiCandidates: new Set(),
             index: index,
-            hiddenSingle: null, // <<< ADDED
+            hiddenSingle: null,
         };
     });
     // Reset history for the new board
-    history = [];
-    historyIndex = -1;
+    state.history = [];
+    state.historyIndex = -1;
     saveHistory(); // Save the initial state of the *new* board
     renderBoard();
 }
 
 
-function saveHistory() {
-    // <<< ADDED: Recalculate hidden singles before saving the state
-    if(isAssistHiddenSinglesActive) {
+export function saveHistory() {
+    if(state.isAssistHiddenSinglesActive) {
         updateHiddenSinglesState(); 
     }
-    // --- END ---
 
-    if(historyIndex < history.length - 1) {
-        history = history.slice(0, historyIndex + 1);
+    if(state.historyIndex < state.history.length - 1) {
+        state.history = state.history.slice(0, state.historyIndex + 1);
     }
-    const snapshot = JSON.parse(JSON.stringify(gameState.map(cell => ({...cell, candidates: Array.from(cell.candidates), antiCandidates: Array.from(cell.antiCandidates)}))));
-    history.push(snapshot);
-    historyIndex = history.length - 1;
+    const snapshot = JSON.parse(JSON.stringify(state.gameState.map(cell => ({...cell, candidates: Array.from(cell.candidates), antiCandidates: Array.from(cell.antiCandidates)}))));
+    state.history.push(snapshot);
+    state.historyIndex = state.history.length - 1;
     updateUndoRedoButtons();
 }
 
-function loadFromHistory(index) {
-    if(index < 0 || index >= history.length) return;
-    const snapshot = JSON.parse(JSON.stringify(history[index]));
-    gameState = snapshot.map(cell => ({ ...cell, candidates: new Set(cell.candidates), antiCandidates: new Set(cell.antiCandidates) }));
-    historyIndex = index;
+export function loadFromHistory(index) {
+    if(index < 0 || index >= state.history.length) return;
+    const snapshot = JSON.parse(JSON.stringify(state.history[index]));
+    state.gameState = snapshot.map(cell => ({ ...cell, candidates: new Set(cell.candidates), antiCandidates: new Set(cell.antiCandidates) }));
+    state.historyIndex = index;
     renderBoard();
     updateUndoRedoButtons();
 }
 
 function precomputePeers() {
-    peers.length = 0; // Clear existing peers before recomputing
+    state.peers.length = 0;
     for (let i = 0; i < 81; i++) {
         const row = Math.floor(i / 9);
         const col = i % 9;
@@ -139,11 +141,9 @@ function precomputePeers() {
         for (let r = boxRow * 3; r < boxRow * 3 + 3; r++) {
             for (let c = boxCol * 3; c < boxCol * 3 + 3; c++) { boxPeers.add(r * 9 + c); }
         }
-        // Store all unique peers including the cell itself initially
         const allPeers = new Set([...rowPeers, ...colPeers, ...boxPeers]);
-        // Store the sets excluding the cell itself for later use if needed
-        peers[i] = {
-             all: allPeers, // Includes self
+        state.peers[i] = {
+             all: allPeers,
              row: new Set([...rowPeers].filter(p => p !== i)),
              col: new Set([...colPeers].filter(p => p !== i)),
              box: new Set([...boxPeers].filter(p => p !== i)),
@@ -151,29 +151,24 @@ function precomputePeers() {
     }
 }
 
-// --- ADDED: Hidden Singles Solver ---
-function updateHiddenSinglesState() {
-    if (!gameState || gameState.length === 0) return;
+export function updateHiddenSinglesState() {
+    if (!state.gameState || state.gameState.length === 0) return;
 
-    // 1. Clear all previous hidden single states
     for (let i = 0; i < 81; i++) {
-        gameState[i].hiddenSingle = null;
+        state.gameState[i].hiddenSingle = null;
     }
 
     const allHouses = [];
-    // Add all 9 rows
     for (let r = 0; r < 9; r++) {
         const row = [];
         for (let c = 0; c < 9; c++) row.push(r * 9 + c);
         allHouses.push(row);
     }
-    // Add all 9 columns
     for (let c = 0; c < 9; c++) {
         const col = [];
         for (let r = 0; r < 9; r++) col.push(r * 9 + c);
         allHouses.push(col);
     }
-    // Add all 9 boxes
     for (let br = 0; br < 3; br++) {
         for (let bc = 0; bc < 3; bc++) {
             const box = [];
@@ -184,15 +179,12 @@ function updateHiddenSinglesState() {
         }
     }
 
-    // 2. Iterate through each house (27 total)
     for (const house of allHouses) {
-        // For this house, find candidate counts
-        const candidateCounts = Array(10).fill(0); // Index 1-9
-        const candidateMap = Array(10).fill(null).map(() => []); // Map of num -> [cellIndex, cellIndex]
+        const candidateCounts = Array(10).fill(0);
+        const candidateMap = Array(10).fill(null).map(() => []);
 
         for (const index of house) {
-            const cell = gameState[index];
-            // Only check empty cells with candidates
+            const cell = state.gameState[index];
             if (!cell.value && cell.candidates.size > 0) {
                 for (const num of cell.candidates) {
                     candidateCounts[num]++;
@@ -201,19 +193,13 @@ function updateHiddenSinglesState() {
             }
         }
 
-        // 3. Find numbers that appear exactly once
         for (let num = 1; num <= 9; num++) {
             if (candidateCounts[num] === 1) {
-                // This 'num' is a hidden single in this house
                 const cellIndex = candidateMap[num][0];
-                
-                // Only set if the cell has more than one candidate
-                // (If it only has one, it's a "Naked Single", not "Hidden")
-                if (gameState[cellIndex].candidates.size > 1) {
-                    gameState[cellIndex].hiddenSingle = num;
+                if (state.gameState[cellIndex].candidates.size > 1) {
+                    state.gameState[cellIndex].hiddenSingle = num;
                 }
             }
         }
     }
 }
-// --- END ---
